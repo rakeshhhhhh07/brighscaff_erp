@@ -86,38 +86,32 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
 ) ENGINE=InnoDB;
 
 USE bright_scaff;
-DELIMITER $$
-DROP PROCEDURE IF EXISTS bright_scaff_add_column_if_missing$$
-CREATE PROCEDURE bright_scaff_add_column_if_missing(IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_definition TEXT)
-BEGIN
- IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=p_table AND column_name=p_column) THEN
-  SET @ddl = CONCAT('ALTER TABLE `', REPLACE(p_table,'`','``'), '` ADD COLUMN `', REPLACE(p_column,'`','``'), '` ', p_definition);
-  PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
- END IF;
-END$$
-CALL bright_scaff_add_column_if_missing('rental_orders','apply_gst',"BOOLEAN NOT NULL DEFAULT FALSE")$$
-CALL bright_scaff_add_column_if_missing('rental_orders','gst_rate',"DECIMAL(5,2) NOT NULL DEFAULT 18.00")$$
-CALL bright_scaff_add_column_if_missing('rental_orders','advance_paid',"DECIMAL(14,2) NOT NULL DEFAULT 0.00")$$
-CALL bright_scaff_add_column_if_missing('rental_orders','vehicle_rent_amount',"DECIMAL(14,2) NOT NULL DEFAULT 0.00")$$
-CALL bright_scaff_add_column_if_missing('rental_orders','vehicle_rent_stage',"ENUM('DELIVERY','RETURN','BOTH') NULL")$$
-CALL bright_scaff_add_column_if_missing('rental_orders','vehicle_type',"VARCHAR(100) NULL")$$
-CALL bright_scaff_add_column_if_missing('rental_orders','vehicle_number',"VARCHAR(40) NULL")$$
-CALL bright_scaff_add_column_if_missing('rental_orders','vehicle_paid_status',"ENUM('UNPAID','PARTIAL','PAID') NOT NULL DEFAULT 'UNPAID'")$$
-CALL bright_scaff_add_column_if_missing('rental_orders','vehicle_payment_method',"VARCHAR(60) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','company',"VARCHAR(180) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','main_mobile',"VARCHAR(40) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','mobile_2',"VARCHAR(40) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','mobile_3',"VARCHAR(40) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','office_address',"TEXT NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','office_email',"VARCHAR(180) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','residential_address',"TEXT NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','gst_number',"VARCHAR(80) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','guarantor_relationship',"VARCHAR(100) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','guarantor_name',"VARCHAR(180) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','guarantor_contact',"VARCHAR(40) NULL")$$
-CALL bright_scaff_add_column_if_missing('customers','guarantor_address',"TEXT NULL")$$
-DROP PROCEDURE bright_scaff_add_column_if_missing$$
-DELIMITER ;
+
+ALTER TABLE rental_orders
+    ADD COLUMN apply_gst BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN gst_rate DECIMAL(5,2) NOT NULL DEFAULT 18.00,
+    ADD COLUMN advance_paid DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+    ADD COLUMN vehicle_rent_amount DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+    ADD COLUMN vehicle_rent_stage ENUM('DELIVERY','RETURN','BOTH') NULL,
+    ADD COLUMN vehicle_type VARCHAR(100) NULL,
+    ADD COLUMN vehicle_number VARCHAR(40) NULL,
+    ADD COLUMN vehicle_paid_status ENUM('UNPAID','PARTIAL','PAID')
+        NOT NULL DEFAULT 'UNPAID',
+    ADD COLUMN vehicle_payment_method VARCHAR(60) NULL;
+
+ALTER TABLE customers
+    ADD COLUMN company VARCHAR(180) NULL,
+    ADD COLUMN main_mobile VARCHAR(40) NULL,
+    ADD COLUMN mobile_2 VARCHAR(40) NULL,
+    ADD COLUMN mobile_3 VARCHAR(40) NULL,
+    ADD COLUMN office_address TEXT NULL,
+    ADD COLUMN office_email VARCHAR(180) NULL,
+    ADD COLUMN residential_address TEXT NULL,
+    ADD COLUMN gst_number VARCHAR(80) NULL,
+    ADD COLUMN guarantor_relationship VARCHAR(100) NULL,
+    ADD COLUMN guarantor_name VARCHAR(180) NULL,
+    ADD COLUMN guarantor_contact VARCHAR(40) NULL,
+    ADD COLUMN guarantor_address TEXT NULL;
 
 CREATE TABLE IF NOT EXISTS rental_payments (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -137,8 +131,6 @@ CREATE TABLE IF NOT EXISTS rental_payments (
 -- Run once against the existing bright_scaff database.
 USE bright_scaff;
 
-ALTER TABLE rental_order_items
-  ADD COLUMN is_daily_rental BOOLEAN NOT NULL DEFAULT FALSE AFTER post_30_day_daily_rate;
 
 -- Optional: the app now uses ONE daily rate per item (initial_daily_rate).
 -- The old "after 30 days" columns are kept for history; align them so nothing diverges.
