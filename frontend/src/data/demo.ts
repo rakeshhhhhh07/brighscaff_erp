@@ -1,0 +1,91 @@
+import type { Customer, Item, Summary } from '../types';
+export const demoCustomers: Customer[] = [
+  {
+    customer_code: 'BSC-1001',
+    customer_name: 'Diya Construction',
+    contact_person: 'George Thomas',
+    phone: '+91 95625 08333',
+    is_active: true,
+  },
+  {
+    customer_code: 'BSC-1002',
+    customer_name: 'Sibi Abraham',
+    contact_person: 'Sibi Abraham',
+    phone: '+91 90370 77724',
+    is_active: true,
+  },
+  {
+    customer_code: 'BSC-1003',
+    customer_name: 'Apex Buildworks',
+    contact_person: 'Arun Mathew',
+    phone: '+91 98470 12345',
+    is_active: true,
+  },
+  {
+    customer_code: 'BSC-1004',
+    customer_name: 'Kerala Infra Projects',
+    contact_person: 'Nikhil Raj',
+    phone: '+91 98950 45678',
+    is_active: true,
+  },
+];
+export const demoItems: Item[] = [
+  {
+    item_code: 'PIP-001',
+    item_name: 'Scaffolding Pipe',
+    category: 'Scaffolding',
+    unit: 'Nos',
+    total_stock: 2400,
+    initial_daily_rate: 20,
+    post_30_day_daily_rate: 25,
+    has_monthly_minimum: true,
+  },
+  {
+    item_code: 'SHT-002',
+    item_name: 'Metal Sheet',
+    category: 'Formwork',
+    unit: 'Nos',
+    total_stock: 1200,
+    initial_daily_rate: 10,
+    post_30_day_daily_rate: 15,
+    has_monthly_minimum: true,
+  },
+  {
+    item_code: 'SHT-003',
+    item_name: 'Adjustable Shutter',
+    category: 'Formwork',
+    unit: 'Nos',
+    total_stock: 850,
+    initial_daily_rate: 25,
+    post_30_day_daily_rate: 30,
+    has_monthly_minimum: true,
+  },
+  {
+    item_code: 'JAK-004',
+    item_name: 'U-Head Screw Jack',
+    category: 'Accessories',
+    unit: 'Nos',
+    total_stock: 640,
+    initial_daily_rate: 8,
+    post_30_day_daily_rate: 10,
+    has_monthly_minimum: true,
+  },
+];
+export const demoSummary: Summary = {
+  customers: 1248,
+  active_customers: 1214,
+  catalogue_items: 18,
+  total_stock: 12640,
+  active_rentals: 186,
+  items_on_rent: 8450,
+  rent_accrued: 485000,
+  outstanding_amount: 0,
+};
+export const chartData = [
+  { month: 'May', rent: 28000 },
+  { month: 'Jun', rent: 36000 },
+  { month: 'Jul', rent: 33000 },
+  { month: 'Aug', rent: 47000 },
+  { month: 'Sep', rent: 42000 },
+  { month: 'Oct', rent: 58000 },
+];
