@@ -1,7 +1,8 @@
 """Customer statements with auditable rental timelines and explicit charge maths.
 
-Date convention: the delivery day itself is NOT charged. Day 1 of the rental is the day
-after delivery, and the return / as-of date is counted (delivery 01-10, return 06-10 = 5 days).
+Date convention: the delivery day IS day 1 of the rental, and the return / as-of date is
+counted too (delivery 01-10, return 06-10 = 6 days). A 30-day period therefore runs from
+the delivery date to the 29th day after it (delivery 02-07 = 02-07 to 31-07).
 There is a single daily rate per item. Normal lines have a 30-day minimum (days 1-30), then
 the same daily rate for every further day. Lines flagged "daily rental" have no minimum:
 days elapsed x daily rate. This is displayed in exports so the customer can audit it.
@@ -44,8 +45,8 @@ DEFAULT_GST_RATE = 18
 MINIMUM_RENTAL_DAYS = 30
 
 STATEMENT_NOTE = (
-    "Rental days are counted from the day after delivery up to and including the return/as-of "
-    "date; the delivery day itself is not charged. "
+    "Rental days are counted from the delivery date up to and including the return/as-of "
+    "date; the delivery day itself is day 1. "
     "Normal items are charged a 30-day minimum per unit at the daily rate, and every day after "
     "day 30 at the same daily rate. Items marked as daily rental are charged only for the days "
     "used, with no 30-day minimum. "
@@ -183,14 +184,15 @@ def split_return_groups(ctx, returns, end_date):
 
 
 def rental_start(ctx):
-    """First chargeable day: the day AFTER delivery."""
-    return day_offset(ctx.issue, 1)
+    """First chargeable day: the delivery day itself is day 1."""
+    return ctx.issue
 
 
 def build_first_period_spec(ctx, last, qty, window):
     """The opening rental month (days 1-30), where the 30-day minimum applies even on early return."""
     start = rental_start(ctx)
-    first_end = min(last, day_offset(ctx.issue, MINIMUM_RENTAL_DAYS))
+    # Day 30 is 29 days after the delivery day, because the delivery day is day 1.
+    first_end = min(last, day_offset(ctx.issue, MINIMUM_RENTAL_DAYS - 1))
     per_unit = max(
         money(ctx.initial_rate * Decimal(window.first_days_actual)), window.minimum_per_unit
     )
@@ -234,7 +236,7 @@ def build_extra_period_specs(ctx, qty, window):
     """Every further 30-day block after day 30, plus the final partial block, shown separately."""
     specs = []
     remaining = max(window.days - MINIMUM_RENTAL_DAYS, 0)
-    cursor = day_offset(ctx.issue, MINIMUM_RENTAL_DAYS + 1)
+    cursor = day_offset(ctx.issue, MINIMUM_RENTAL_DAYS)
     period_number = 1
     while remaining > 0:
         chunk_days = min(MINIMUM_RENTAL_DAYS, remaining)
@@ -265,7 +267,7 @@ def build_extra_period_specs(ctx, qty, window):
 
 def build_period_specs(ctx, last, qty):
     """Break one return group into its billable periods."""
-    days = (last - ctx.issue).days  # delivery day not counted; return / as-of day counted
+    days = (last - ctx.issue).days + 1  # delivery day is day 1; return / as-of day counted too
     if ctx.is_daily:
         window = ChargeWindow(days=days, first_days_actual=days, minimum_per_unit=ZERO)
         return [build_daily_rental_spec(ctx, last, qty, window)], window
@@ -311,6 +313,9 @@ def build_return_event(ctx, ret, qty):
         "source_order_id": int(line["rental_order_id"]),
         "rental_order_item_id": int(line["rental_order_item_id"]),
         "quantity": qty,
+        # Structured fields consumed by the statement template exports.
+        "item_name": line["item_name"],
+        "unit": line["unit"],
         "event_detail": (
             f"Return condition: {ret['item_condition']}; delivery {line['rental_number']} "
             f"issued {date_text(ctx.issue)}"
@@ -1167,14 +1172,18 @@ def item_line_text(entry):
 
 
 def charge_line_text(entry):
-    """``31.08.2026 TO 01.09.2026 [2 DAYS] [1650/30*2]`` — the rent period wording.
+    """``31.08.2026 TO 01.09.2026 [2 DAYS] [49500/30*2]`` — the rent period wording.
 
     A full 30-day block shows only the span. A part period also shows the pro-rata
-    working so the customer can verify the figure by hand.
+    working so the customer can verify the figure by hand. A row that bills only part
+    of the delivery is prefixed with those item names.
     """
     span = (
         f"{display_date(entry.get('period_start'))} TO {display_date(entry.get('period_end'))}"
     )
+    prefix = entry.get("merged_item_label") or ""
+    if prefix:
+        span = f"{prefix} {span}"
     days = int(entry.get("period_days") or 0)
     if entry.get("is_daily_rental"):
         return f"{span} [{days} DAYS]"
@@ -1311,6 +1320,57 @@ def blank_repeated_keys(rows_out):
     return rows_out
 
 
+def charge_merge_key(entry):
+    """Rent rows that share this key bill the same span and can print as one line.
+
+    Daily-rental items are deliberately kept apart: they carry no 30-day minimum, so
+    folding them into a 30-day block would misstate the basis of the charge.
+    """
+    if entry.get("is_daily_rental"):
+        return ("DAILY", entry.get("rental_order_item_id"), entry.get("period_start"))
+    return ("PERIOD", entry.get("period_start"), entry.get("period_end"))
+
+
+def merge_charge_events(charge_events):
+    """Collapse the per-item rent rows of one bill into a single row per billed period.
+
+    Every item delivered together shares its period boundaries, so the statement reads
+    ``02.07.2026 TO 31.07.2026  49,500.00`` instead of one line per item. Items that
+    diverge - returned on another date, delivered on another date, or billed daily -
+    keep their own rows, and those name the item so the split stays readable.
+    """
+    groups = {}
+    for event in charge_events:
+        groups.setdefault(charge_merge_key(event), []).append(event)
+
+    # A row that bills every item on the bill needs no item name: the issued-item
+    # list directly above it already says what the money covers. A row billing only
+    # some of them does, otherwise two differing spans look interchangeable.
+    bill_items = {e.get("rental_order_item_id") for e in charge_events}
+
+    merged = []
+    for group in groups.values():
+        group_items = {e.get("rental_order_item_id") for e in group}
+        names = sorted({(e.get("item_name") or "").upper() for e in group if e.get("item_name")})
+        label = "" if group_items == bill_items else ", ".join(names)
+        first = group[0]
+        merged.append(
+            {
+                **first,
+                "debit": float(sum(float(e.get("debit") or 0) for e in group)),
+                # The pro-rata working on a part period quotes the 30-day rent of
+                # everything on the row, so it is summed alongside the charge itself.
+                "full_month_amount": float(
+                    sum(float(e.get("full_month_amount") or 0) for e in group)
+                ),
+                "quantity": sum(int(e.get("quantity") or 0) for e in group),
+                "merged_item_label": label,
+            }
+        )
+    merged.sort(key=lambda e: (e["transaction_date"], e.get("period_start") or ""))
+    return merged
+
+
 def statement_blocks(entries):
     """Group the timeline into dated blocks, in the layout the template specifies.
 
@@ -1338,7 +1398,7 @@ def statement_blocks(entries):
         bill_rows = delivery_block_rows(group)
         # Rent periods and returns belong to the bill they were raised against, so
         # they print inside its block in date order.
-        followups = charges.pop(order_id, []) + returns.pop(order_id, [])
+        followups = merge_charge_events(charges.pop(order_id, [])) + returns.pop(order_id, [])
         for event in sorted(followups, key=lambda c: (c["transaction_date"], c.get("sort_order", 9))):
             bill_rows.append(
                 return_row(event)
