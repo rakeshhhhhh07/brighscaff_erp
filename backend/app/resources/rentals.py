@@ -94,7 +94,16 @@ SQL_ORDER_LIST = """
            OR c.customer_name LIKE :like OR c.customer_code LIKE :like
            OR ro.site_name LIKE :like)
       AND (:status='' OR ro.status=:status)
-    GROUP BY ro.id
+    GROUP BY
+    ro.id,
+    ro.rental_number,
+    ro.customer_id,
+    ro.issue_date,
+    ro.status,
+    ro.notes,
+    ro.site_name,
+    c.customer_code,
+    c.customer_name
     ORDER BY ro.issue_date DESC, ro.id DESC
 """
 
