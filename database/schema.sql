@@ -1,219 +1,335 @@
-CREATE DATABASE IF NOT EXISTS bright_scaff CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE bright_scaff;
-CREATE TABLE IF NOT EXISTS customers (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, customer_code VARCHAR(40) NOT NULL UNIQUE,
- customer_name VARCHAR(180) NOT NULL, contact_person VARCHAR(180), phone VARCHAR(40), email VARCHAR(180),
- billing_address TEXT, site_address TEXT, tax_number VARCHAR(80), opening_balance DECIMAL(14,2) NOT NULL DEFAULT 0,
- is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
- INDEX idx_customers_name(customer_name), INDEX idx_customers_phone(phone)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS customer_sites (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, customer_id BIGINT UNSIGNED NOT NULL, site_name VARCHAR(180) NOT NULL,
- address TEXT, is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- CONSTRAINT fk_sites_customer FOREIGN KEY(customer_id) REFERENCES customers(id)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS items (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, item_code VARCHAR(50) NOT NULL UNIQUE, item_name VARCHAR(180) NOT NULL,
- category VARCHAR(100), unit VARCHAR(30) NOT NULL DEFAULT 'Nos', total_stock INT UNSIGNED NOT NULL DEFAULT 0,
- initial_daily_rate DECIMAL(12,2) NOT NULL DEFAULT 0, post_30_day_daily_rate DECIMAL(12,2) NOT NULL DEFAULT 0,
- has_monthly_minimum BOOLEAN NOT NULL DEFAULT TRUE, is_active BOOLEAN NOT NULL DEFAULT TRUE,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
- INDEX idx_items_name(item_name)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS inventory_movements (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, item_id BIGINT UNSIGNED NOT NULL,
- movement_type ENUM('OPENING','PURCHASE','ISSUE','RETURN','DAMAGE','LOSS','ADJUSTMENT') NOT NULL,
- quantity INT NOT NULL, reference_type VARCHAR(40), reference_id BIGINT UNSIGNED, movement_date DATE NOT NULL,
- notes VARCHAR(500), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- CONSTRAINT fk_movements_item FOREIGN KEY(item_id) REFERENCES items(id), INDEX idx_movements_item_date(item_id,movement_date)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS rental_orders (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, rental_number VARCHAR(50) NOT NULL UNIQUE,
- customer_id BIGINT UNSIGNED NOT NULL, site_id BIGINT UNSIGNED, issue_date DATE NOT NULL,
- status ENUM('OPEN','PARTIALLY_RETURNED','CLOSED','CANCELLED') NOT NULL DEFAULT 'OPEN', notes TEXT,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
- CONSTRAINT fk_rentals_customer FOREIGN KEY(customer_id) REFERENCES customers(id),
- CONSTRAINT fk_rentals_site FOREIGN KEY(site_id) REFERENCES customer_sites(id), INDEX idx_rentals_customer_status(customer_id,status)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS rental_order_items (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, rental_order_id BIGINT UNSIGNED NOT NULL, item_id BIGINT UNSIGNED NOT NULL,
- quantity_issued INT UNSIGNED NOT NULL, initial_daily_rate DECIMAL(12,2) NOT NULL, post_30_day_daily_rate DECIMAL(12,2) NOT NULL,
- is_daily_rental BOOLEAN NOT NULL DEFAULT FALSE,
- issue_date DATE NOT NULL, notes VARCHAR(500), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- CONSTRAINT fk_order_items_order FOREIGN KEY(rental_order_id) REFERENCES rental_orders(id),
- CONSTRAINT fk_order_items_item FOREIGN KEY(item_id) REFERENCES items(id)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS rental_returns (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, return_number VARCHAR(50) NOT NULL UNIQUE,
- rental_order_id BIGINT UNSIGNED NOT NULL, return_date DATE NOT NULL, notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- CONSTRAINT fk_returns_order FOREIGN KEY(rental_order_id) REFERENCES rental_orders(id)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS rental_return_items (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, rental_return_id BIGINT UNSIGNED NOT NULL,
- rental_order_item_id BIGINT UNSIGNED NOT NULL, quantity_returned INT UNSIGNED NOT NULL,
- item_condition ENUM('GOOD','DAMAGED','MISSING') NOT NULL DEFAULT 'GOOD', notes VARCHAR(500),
- CONSTRAINT fk_return_items_return FOREIGN KEY(rental_return_id) REFERENCES rental_returns(id),
- CONSTRAINT fk_return_items_order_item FOREIGN KEY(rental_order_item_id) REFERENCES rental_order_items(id)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS rental_charges (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, rental_order_item_id BIGINT UNSIGNED NOT NULL,
- period_start DATE NOT NULL, period_end DATE NOT NULL,
- charge_type ENUM('MINIMUM_30_DAY','EXTRA_DAILY','ADJUSTMENT','OTHER') NOT NULL,
- quantity INT UNSIGNED NOT NULL, rate DECIMAL(12,2) NOT NULL, amount DECIMAL(14,2) NOT NULL,
- calculation_notes VARCHAR(500), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- CONSTRAINT fk_charges_order_item FOREIGN KEY(rental_order_item_id) REFERENCES rental_order_items(id)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS invoices (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, invoice_number VARCHAR(50) NOT NULL UNIQUE,
- customer_id BIGINT UNSIGNED NOT NULL, invoice_date DATE NOT NULL, period_start DATE, period_end DATE,
- subtotal DECIMAL(14,2) NOT NULL DEFAULT 0, tax_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
- total_amount DECIMAL(14,2) NOT NULL DEFAULT 0, status ENUM('DRAFT','ISSUED','VOID') NOT NULL DEFAULT 'DRAFT', notes TEXT,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_invoices_customer FOREIGN KEY(customer_id) REFERENCES customers(id)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS invoice_lines (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, invoice_id BIGINT UNSIGNED NOT NULL, description VARCHAR(500) NOT NULL,
- quantity DECIMAL(12,2) NOT NULL DEFAULT 1, rate DECIMAL(12,2) NOT NULL DEFAULT 0, amount DECIMAL(14,2) NOT NULL DEFAULT 0,
- rental_order_item_id BIGINT UNSIGNED, CONSTRAINT fk_invoice_lines_invoice FOREIGN KEY(invoice_id) REFERENCES invoices(id),
- CONSTRAINT fk_invoice_lines_order_item FOREIGN KEY(rental_order_item_id) REFERENCES rental_order_items(id)
-) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS ledger_entries (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, customer_id BIGINT UNSIGNED NOT NULL, transaction_date DATE NOT NULL,
- reference_number VARCHAR(60), transaction_type ENUM('OPENING_BALANCE','RENT','OTHER_CHARGE','RECEIPT','CREDIT_NOTE','ADJUSTMENT') NOT NULL,
- particulars VARCHAR(500) NOT NULL, debit DECIMAL(14,2) NOT NULL DEFAULT 0, credit DECIMAL(14,2) NOT NULL DEFAULT 0,
- source_type VARCHAR(40), source_id BIGINT UNSIGNED, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- CONSTRAINT fk_ledger_customer FOREIGN KEY(customer_id) REFERENCES customers(id), INDEX idx_ledger_customer_date(customer_id,transaction_date,id)
-) ENGINE=InnoDB;
+-- BRIGHT SCAFF: TiDB-compatible structure-only schema
+-- Generated from the supplied working local MySQL 8.0 dump.
+-- No INSERT statements or existing data are included.
+-- Safe for existing tables: CREATE TABLE IF NOT EXISTS does not drop or overwrite them.
+-- IMPORTANT: This creates missing tables only; it does not add missing columns to tables
+-- that already exist. Compare existing table definitions separately if needed.
 
-USE bright_scaff;
+USE `bright_scaff`;
 
-ALTER TABLE rental_orders
-    ADD COLUMN apply_gst BOOLEAN NOT NULL DEFAULT FALSE,
-    ADD COLUMN gst_rate DECIMAL(5,2) NOT NULL DEFAULT 18.00,
-    ADD COLUMN advance_paid DECIMAL(14,2) NOT NULL DEFAULT 0.00,
-    ADD COLUMN vehicle_rent_amount DECIMAL(14,2) NOT NULL DEFAULT 0.00,
-    ADD COLUMN vehicle_rent_stage ENUM('DELIVERY','RETURN','BOTH') NULL,
-    ADD COLUMN vehicle_type VARCHAR(100) NULL,
-    ADD COLUMN vehicle_number VARCHAR(40) NULL,
-    ADD COLUMN vehicle_paid_status ENUM('UNPAID','PARTIAL','PAID')
-        NOT NULL DEFAULT 'UNPAID',
-    ADD COLUMN vehicle_payment_method VARCHAR(60) NULL;
+-- Table: app_users
+CREATE TABLE IF NOT EXISTS `app_users` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `username` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `full_name` varchar(180) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `email` varchar(180) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `password_hash` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `role` enum('ADMIN','MANAGER','STAFF') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'STAFF',
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `must_change_password` tinyint(1) NOT NULL DEFAULT '0',
+  `last_login_at` datetime DEFAULT NULL,
+  `created_by` bigint unsigned DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`),
+  KEY `idx_app_users_active` (`is_active`),
+  KEY `fk_app_users_creator` (`created_by`),
+  CONSTRAINT `fk_app_users_creator` FOREIGN KEY (`created_by`) REFERENCES `app_users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-ALTER TABLE customers
-    ADD COLUMN company VARCHAR(180) NULL,
-    ADD COLUMN main_mobile VARCHAR(40) NULL,
-    ADD COLUMN mobile_2 VARCHAR(40) NULL,
-    ADD COLUMN mobile_3 VARCHAR(40) NULL,
-    ADD COLUMN office_address TEXT NULL,
-    ADD COLUMN office_email VARCHAR(180) NULL,
-    ADD COLUMN residential_address TEXT NULL,
-    ADD COLUMN gst_number VARCHAR(80) NULL,
-    ADD COLUMN guarantor_relationship VARCHAR(100) NULL,
-    ADD COLUMN guarantor_name VARCHAR(180) NULL,
-    ADD COLUMN guarantor_contact VARCHAR(40) NULL,
-    ADD COLUMN guarantor_address TEXT NULL;
+-- Table: customers
+CREATE TABLE IF NOT EXISTS `customers` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `customer_code` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `customer_name` varchar(180) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `contact_person` varchar(180) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `phone` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `email` varchar(180) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `billing_address` text COLLATE utf8mb4_unicode_ci,
+  `site_address` text COLLATE utf8mb4_unicode_ci,
+  `tax_number` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `opening_balance` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `company` varchar(180) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `main_mobile` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `mobile_2` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `mobile_3` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `office_address` text COLLATE utf8mb4_unicode_ci,
+  `office_email` varchar(180) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `residential_address` text COLLATE utf8mb4_unicode_ci,
+  `gst_number` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `guarantor_relationship` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `guarantor_name` varchar(180) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `guarantor_contact` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `guarantor_address` text COLLATE utf8mb4_unicode_ci,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `customer_code` (`customer_code`),
+  KEY `idx_customers_name` (`customer_name`),
+  KEY `idx_customers_phone` (`phone`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS rental_payments (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
- rental_order_id BIGINT UNSIGNED NOT NULL,
- payment_date DATE NOT NULL,
- amount DECIMAL(14,2) NOT NULL,
- payment_method VARCHAR(60) NULL,
- payment_type ENUM('ADVANCE','RETURN_PAYMENT','OTHER') NOT NULL DEFAULT 'OTHER',
- reference_number VARCHAR(60) NULL,
- notes VARCHAR(500) NULL,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- CONSTRAINT fk_rental_payments_order FOREIGN KEY (rental_order_id) REFERENCES rental_orders(id),
- INDEX idx_rental_payments_order_date (rental_order_id,payment_date)
-) ENGINE=InnoDB;
+-- Table: items
+CREATE TABLE IF NOT EXISTS `items` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `item_code` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `item_name` varchar(180) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `unit` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Nos',
+  `total_stock` int unsigned NOT NULL DEFAULT '0',
+  `initial_daily_rate` decimal(12,2) NOT NULL DEFAULT '0.00',
+  `post_30_day_daily_rate` decimal(12,2) NOT NULL DEFAULT '0.00',
+  `has_monthly_minimum` tinyint(1) NOT NULL DEFAULT '1',
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `item_code` (`item_code`),
+  KEY `idx_items_name` (`item_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- BRIGHT SCAFF: "Take as daily rental" per delivery line.
--- Run once against the existing bright_scaff database.
-USE bright_scaff;
+-- Table: customer_sites
+CREATE TABLE IF NOT EXISTS `customer_sites` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `customer_id` bigint unsigned NOT NULL,
+  `site_name` varchar(180) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `address` text COLLATE utf8mb4_unicode_ci,
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `fk_sites_customer` (`customer_id`),
+  CONSTRAINT `fk_sites_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: invoices
+CREATE TABLE IF NOT EXISTS `invoices` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `invoice_number` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `customer_id` bigint unsigned NOT NULL,
+  `invoice_date` date NOT NULL,
+  `period_start` date DEFAULT NULL,
+  `period_end` date DEFAULT NULL,
+  `subtotal` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `tax_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `total_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `status` enum('DRAFT','ISSUED','VOID') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'DRAFT',
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `invoice_number` (`invoice_number`),
+  KEY `fk_invoices_customer` (`customer_id`),
+  CONSTRAINT `fk_invoices_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: rental_orders
+CREATE TABLE IF NOT EXISTS `rental_orders` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `rental_number` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `customer_id` bigint unsigned NOT NULL,
+  `site_id` bigint unsigned DEFAULT NULL,
+  `issue_date` date NOT NULL,
+  `status` enum('OPEN','PARTIALLY_RETURNED','CLOSED','CANCELLED') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'OPEN',
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `apply_gst` tinyint(1) NOT NULL DEFAULT '0',
+  `gst_rate` decimal(5,2) NOT NULL DEFAULT '18.00',
+  `advance_paid` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `vehicle_rent_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `vehicle_rent_stage` enum('DELIVERY','RETURN','BOTH') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `vehicle_type` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `vehicle_number` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `vehicle_paid_status` enum('UNPAID','PARTIAL','PAID') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'UNPAID',
+  `vehicle_payment_method` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `site_name` varchar(180) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `discount_allowed` tinyint(1) NOT NULL DEFAULT '0',
+  `discount_type` enum('PERCENT','FIXED') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `discount_value` decimal(14,2) NOT NULL DEFAULT '0.00',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `rental_number` (`rental_number`),
+  KEY `fk_rentals_site` (`site_id`),
+  KEY `idx_rentals_customer_status` (`customer_id`,`status`),
+  CONSTRAINT `fk_rentals_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`),
+  CONSTRAINT `fk_rentals_site` FOREIGN KEY (`site_id`) REFERENCES `customer_sites` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: rental_order_items
+CREATE TABLE IF NOT EXISTS `rental_order_items` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `rental_order_id` bigint unsigned NOT NULL,
+  `item_id` bigint unsigned NOT NULL,
+  `quantity_issued` int unsigned NOT NULL,
+  `initial_daily_rate` decimal(12,2) NOT NULL,
+  `post_30_day_daily_rate` decimal(12,2) NOT NULL,
+  `is_daily_rental` tinyint(1) NOT NULL DEFAULT '0',
+  `issue_date` date NOT NULL,
+  `notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `fk_order_items_order` (`rental_order_id`),
+  KEY `fk_order_items_item` (`item_id`),
+  CONSTRAINT `fk_order_items_item` FOREIGN KEY (`item_id`) REFERENCES `items` (`id`),
+  CONSTRAINT `fk_order_items_order` FOREIGN KEY (`rental_order_id`) REFERENCES `rental_orders` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: inventory_movements
+CREATE TABLE IF NOT EXISTS `inventory_movements` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `item_id` bigint unsigned NOT NULL,
+  `movement_type` enum('OPENING','PURCHASE','ISSUE','RETURN','DAMAGE','LOSS','ADJUSTMENT') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quantity` int NOT NULL,
+  `reference_type` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `reference_id` bigint unsigned DEFAULT NULL,
+  `movement_date` date NOT NULL,
+  `notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_movements_item_date` (`item_id`,`movement_date`),
+  CONSTRAINT `fk_movements_item` FOREIGN KEY (`item_id`) REFERENCES `items` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: invoice_lines
+CREATE TABLE IF NOT EXISTS `invoice_lines` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `invoice_id` bigint unsigned NOT NULL,
+  `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quantity` decimal(12,2) NOT NULL DEFAULT '1.00',
+  `rate` decimal(12,2) NOT NULL DEFAULT '0.00',
+  `amount` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `rental_order_item_id` bigint unsigned DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `fk_invoice_lines_invoice` (`invoice_id`),
+  KEY `fk_invoice_lines_order_item` (`rental_order_item_id`),
+  CONSTRAINT `fk_invoice_lines_invoice` FOREIGN KEY (`invoice_id`) REFERENCES `invoices` (`id`),
+  CONSTRAINT `fk_invoice_lines_order_item` FOREIGN KEY (`rental_order_item_id`) REFERENCES `rental_order_items` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: ledger_entries
+CREATE TABLE IF NOT EXISTS `ledger_entries` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `customer_id` bigint unsigned NOT NULL,
+  `transaction_date` date NOT NULL,
+  `reference_number` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `transaction_type` enum('OPENING_BALANCE','RENT','OTHER_CHARGE','RECEIPT','CREDIT_NOTE','ADJUSTMENT') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `particulars` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `debit` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `credit` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `source_type` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source_id` bigint unsigned DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_ledger_customer_date` (`customer_id`,`transaction_date`,`id`),
+  CONSTRAINT `fk_ledger_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: rental_charges
+CREATE TABLE IF NOT EXISTS `rental_charges` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `rental_order_item_id` bigint unsigned NOT NULL,
+  `period_start` date NOT NULL,
+  `period_end` date NOT NULL,
+  `charge_type` enum('MINIMUM_30_DAY','EXTRA_DAILY','ADJUSTMENT','OTHER') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quantity` int unsigned NOT NULL,
+  `rate` decimal(12,2) NOT NULL,
+  `amount` decimal(14,2) NOT NULL,
+  `calculation_notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `fk_charges_order_item` (`rental_order_item_id`),
+  CONSTRAINT `fk_charges_order_item` FOREIGN KEY (`rental_order_item_id`) REFERENCES `rental_order_items` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: rental_returns
+CREATE TABLE IF NOT EXISTS `rental_returns` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `return_number` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `rental_order_id` bigint unsigned NOT NULL,
+  `return_date` date NOT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `return_number` (`return_number`),
+  KEY `fk_returns_order` (`rental_order_id`),
+  CONSTRAINT `fk_returns_order` FOREIGN KEY (`rental_order_id`) REFERENCES `rental_orders` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: rental_payments
+CREATE TABLE IF NOT EXISTS `rental_payments` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `rental_order_id` bigint unsigned NOT NULL,
+  `payment_date` date NOT NULL,
+  `amount` decimal(14,2) NOT NULL,
+  `payment_method` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `payment_type` enum('ADVANCE','RETURN_PAYMENT','OTHER') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'OTHER',
+  `reference_number` varchar(60) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_rental_payments_order_date` (`rental_order_id`,`payment_date`),
+  CONSTRAINT `fk_rental_payments_order` FOREIGN KEY (`rental_order_id`) REFERENCES `rental_orders` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: rental_return_adjustments
+CREATE TABLE IF NOT EXISTS `rental_return_adjustments` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `rental_return_id` bigint unsigned NOT NULL,
+  `rental_order_id` bigint unsigned NOT NULL,
+  `vehicle_rent_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `vehicle_type` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `vehicle_number` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `discount_type` enum('PERCENT','FIXED') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `discount_value` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_return_adjustment_return` (`rental_return_id`),
+  KEY `fk_return_adj_order` (`rental_order_id`),
+  CONSTRAINT `fk_return_adj_order` FOREIGN KEY (`rental_order_id`) REFERENCES `rental_orders` (`id`),
+  CONSTRAINT `fk_return_adj_return` FOREIGN KEY (`rental_return_id`) REFERENCES `rental_returns` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: rental_return_audit
+CREATE TABLE IF NOT EXISTS `rental_return_audit` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `return_item_id` bigint unsigned NOT NULL,
+  `rental_return_id` bigint unsigned NOT NULL,
+  `action_type` enum('EDIT','DELETE') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `old_return_number` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `old_return_date` date NOT NULL,
+  `old_rental_order_item_id` bigint unsigned NOT NULL,
+  `old_quantity_returned` int unsigned NOT NULL,
+  `old_item_condition` enum('GOOD','DAMAGED','MISSING') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `old_notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `changed_by` varchar(120) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'system-user',
+  `changed_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_return_audit_item` (`return_item_id`,`changed_at`),
+  KEY `idx_return_audit_header` (`rental_return_id`,`changed_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: rental_return_items
+CREATE TABLE IF NOT EXISTS `rental_return_items` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `rental_return_id` bigint unsigned NOT NULL,
+  `rental_order_item_id` bigint unsigned NOT NULL,
+  `quantity_returned` int unsigned NOT NULL,
+  `item_condition` enum('GOOD','DAMAGED','MISSING') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'GOOD',
+  `notes` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `fk_return_items_return` (`rental_return_id`),
+  KEY `fk_return_items_order_item` (`rental_order_item_id`),
+  CONSTRAINT `fk_return_items_order_item` FOREIGN KEY (`rental_order_item_id`) REFERENCES `rental_order_items` (`id`),
+  CONSTRAINT `fk_return_items_return` FOREIGN KEY (`rental_return_id`) REFERENCES `rental_returns` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: user_login_audit
+CREATE TABLE IF NOT EXISTS `user_login_audit` (
+`id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` bigint unsigned DEFAULT NULL,
+  `username` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `event_type` enum('LOGIN','LOGOUT','LOGIN_FAILED','PASSWORD_CHANGED') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `success` tinyint(1) NOT NULL DEFAULT '1',
+  `ip_address` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `user_agent` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `detail` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_login_audit_user` (`user_id`,`created_at`),
+  KEY `idx_login_audit_username` (`username`,`created_at`),
+  CONSTRAINT `fk_login_audit_user` FOREIGN KEY (`user_id`) REFERENCES `app_users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
--- Optional: the app now uses ONE daily rate per item (initial_daily_rate).
--- The old "after 30 days" columns are kept for history; align them so nothing diverges.
-UPDATE items SET post_30_day_daily_rate = initial_daily_rate;
-
-ALTER TABLE rental_orders
-  ADD COLUMN site_name VARCHAR(180) NULL,
-  ADD COLUMN discount_allowed BOOLEAN NOT NULL DEFAULT FALSE,
-  ADD COLUMN discount_type ENUM('PERCENT','FIXED') NULL,
-  ADD COLUMN discount_value DECIMAL(14,2) NOT NULL DEFAULT 0.00;
-
--- One row per return bill: vehicle rent and/or discount added from Return history.
-CREATE TABLE IF NOT EXISTS rental_return_adjustments (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  rental_return_id BIGINT UNSIGNED NOT NULL,
-  rental_order_id BIGINT UNSIGNED NOT NULL,
-  vehicle_rent_amount DECIMAL(14,2) NOT NULL DEFAULT 0.00,
-  vehicle_type VARCHAR(100) NULL,
-  vehicle_number VARCHAR(40) NULL,
-  discount_type ENUM('PERCENT','FIXED') NULL,
-  discount_value DECIMAL(14,2) NOT NULL DEFAULT 0.00,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_return_adjustment_return (rental_return_id),
-  CONSTRAINT fk_return_adj_return FOREIGN KEY (rental_return_id) REFERENCES rental_returns(id),
-  CONSTRAINT fk_return_adj_order FOREIGN KEY (rental_order_id) REFERENCES rental_orders(id)
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS rental_return_audit (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
- return_item_id BIGINT UNSIGNED NOT NULL,
- rental_return_id BIGINT UNSIGNED NOT NULL,
- action_type ENUM('EDIT','DELETE') NOT NULL,
- old_return_number VARCHAR(50) NOT NULL,
- old_return_date DATE NOT NULL,
- old_rental_order_item_id BIGINT UNSIGNED NOT NULL,
- old_quantity_returned INT UNSIGNED NOT NULL,
- old_item_condition ENUM('GOOD','DAMAGED','MISSING') NOT NULL,
- old_notes VARCHAR(500), reason VARCHAR(500) NOT NULL,
- changed_by VARCHAR(120) NOT NULL DEFAULT 'system-user',
- changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
- INDEX idx_return_audit_item(return_item_id, changed_at),
- INDEX idx_return_audit_header(rental_return_id, changed_at)
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS app_users (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  username VARCHAR(80) NOT NULL UNIQUE,
-  full_name VARCHAR(180) NOT NULL,
-  email VARCHAR(180),
-  -- PBKDF2-SHA256 hash produced by werkzeug.security.generate_password_hash.
-  -- Never store a plaintext password here.
-  password_hash VARCHAR(255) NOT NULL,
-  role ENUM('ADMIN','MANAGER','STAFF') NOT NULL DEFAULT 'STAFF',
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  -- Forces a password change on first login for accounts created by an admin.
-  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
-  last_login_at DATETIME NULL,
-  created_by BIGINT UNSIGNED NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_app_users_active(is_active),
-  CONSTRAINT fk_app_users_creator FOREIGN KEY(created_by) REFERENCES app_users(id)
-) ENGINE=InnoDB;
-
--- ---------------------------------------------------------------------------
--- Login audit trail
---
--- success = 0 rows are kept deliberately: repeated failures for one username
--- or IP are the signal you want when investigating an account lockout.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS user_login_audit (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id BIGINT UNSIGNED NULL,
-  -- Recorded even when no account matches, so unknown-user attempts are visible.
-  username VARCHAR(80) NOT NULL,
-  event_type ENUM('LOGIN','LOGOUT','LOGIN_FAILED','PASSWORD_CHANGED') NOT NULL,
-  success BOOLEAN NOT NULL DEFAULT TRUE,
-  ip_address VARCHAR(64),
-  user_agent VARCHAR(255),
-  detail VARCHAR(255),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_login_audit_user(user_id, created_at),
-  INDEX idx_login_audit_username(username, created_at),
-  CONSTRAINT fk_login_audit_user FOREIGN KEY(user_id) REFERENCES app_users(id)
-) ENGINE=InnoDB;
